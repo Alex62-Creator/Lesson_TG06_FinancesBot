@@ -36,6 +36,7 @@ keyboards = ReplyKeyboardMarkup(keyboard=[
 
 # Создаем БД
 conn = sqlite3.connect('user.db')
+conn.row_factory = sqlite3.Row  # Теперь записи будут вести себя как словари
 cursor = conn.cursor()
 
 # Создаем таблицу в БД
@@ -71,17 +72,43 @@ async def send_start(message: Message):
 
 # Обработка кнопки Регистрация
 @dp.message(F.text == "Регистрация в телеграм боте")
-async def registration(message: Message):
+async def registration(message: Message, state: FSMContext):
     telegram_id = message.from_user.id
-    name = message.from_user.full_name
     cursor.execute('''SELECT * FROM users WHERE telegram_id = ?''', (telegram_id,))
     user = cursor.fetchone()
     if user:
         await message.answer("Вы уже зарегистрированы!")
     else:
-        cursor.execute('''INSERT INTO users (telegram_id, name) VALUES (?, ?)''', (telegram_id, name))
-        conn.commit()
-        await message.answer("Вы успешно зарегистрированы!")
+        await state.set_state(FinancesForm.category1)
+        await message.reply(f"{message.from_user.first_name}, введите первую категорию расходов:")
+
+# Добавление 1-й категории
+@dp.message(FinancesForm.category1)
+async def category1(message: Message, state: FSMContext):
+    await state.update_data(category1 = message.text)
+    await state.set_state(FinancesForm.category2)
+    await message.reply("Введите вторую категорию расходов:")
+
+# Добавление 2-й категории
+@dp.message(FinancesForm.category2)
+async def category2(message: Message, state: FSMContext):
+    await state.update_data(category2 = message.text)
+    await state.set_state(FinancesForm.category3)
+    await message.reply("Введите третью категорию расходов:")
+
+# Добавление 3-й категории и сохранение данных в БД
+@dp.message(FinancesForm.category3)
+async def category3(message: Message, state: FSMContext):
+    await state.update_data(category3 = message.text)
+    telegram_id = message.from_user.id
+    name = message.from_user.full_name
+    data = await state.get_data()
+    cursor.execute('''INSERT INTO users (telegram_id, name,
+                    category1, expenses1, category2, expenses2, category3,  expenses3) VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                   (telegram_id, name, data['category1'], 0, data['category2'], 0, data['category3'], 0))
+    conn.commit()
+    await state.clear()
+    await message.answer("Вы успешно зарегистрированы!")
 
 # Обработка кнопки Курсы валют
 @dp.message(F.text == "Курс валют")
@@ -109,59 +136,108 @@ async def exchange_rates(message: Message):
 @dp.message(F.text == "Советы по экономии")
 async def send_tips(message: Message):
     tips = [
-        "Совет 1: Ведите бюджет и следите за своими расходами.",
-        "Совет 2: Откладывайте часть доходов на сбережения.",
-        "Совет 3: Покупайте товары по скидкам и распродажам."
+        "Ведите бюджет и следите за своими расходами.",
+        "Откладывайте часть доходов на сбережения.",
+        "Покупайте товары по скидкам и распродажам.",
+        "Ведите учет всех доходов и расходов, чтобы видеть полную картину финансов",
+        "Устанавливайте лимиты на категории трат (еда, развлечения, транспорт)",
+        "Планируйте бюджет на месяц вперед и придерживайтесь его",
+        "Откладывайте минимум 10% от дохода на сбережения или инвестиции",
+        "Избегайте спонтанных покупок — составляйте список перед походом в магазин",
+        "Используйте кэшбэк и скидки, чтобы экономить на повседневных расходах",
+        "Регулярно анализируйте траты и находите возможности для сокращения",
+        "Создайте 'финансовую подушку' на случай непредвиденных ситуаций",
+        "Откажитесь от ненужных подписок и услуг, которые не используете",
+        "Ставьте финансовые цели (например, накопить на отпуск) и отслеживайте прогресс"
     ]
     tip = random.choice(tips)
     await message.answer(tip)
 
 # Обработка кнопки Финансы
 @dp.message(F.text == "Личные финансы")
-async def finances(message: Message, state: FSMContext):
-    await state.set_state(FinancesForm.category1)
-    await message.reply("Введите первую категорию расходов:")
+async def finances(message: Message):
+    telegram_id = message.from_user.id
+    cursor.execute('''SELECT * FROM users WHERE telegram_id = ?''', (telegram_id,))
+    user = cursor.fetchone()
+    if user:
+        await message.answer(f"Ваши категории расходов:\n"
+                             f"/category1 ({user['category1']}) - {user['expenses1']}\n"
+                             f"/category2 ({user['category2']}) - {user['expenses2']}\n"
+                             f"/category3 ({user['category3']}) - {user['expenses3']}")
+    else:
+        await message.answer("Вы еще не зарегистрированы!")
 
-@dp.message(FinancesForm.category1)
-async def finances(message: Message, state: FSMContext):
-    await state.update_data(category1 = message.text)
+# Обработка команды /category1
+@dp.message(Command('category1'))
+async def cat1(message: Message, state: FSMContext):
     await state.set_state(FinancesForm.expenses1)
-    await message.reply("Введите расходы для категории 1:")
+    await message.reply(f"Введите потраченную сумму:")
 
+# Добавление потраченной суммы к расходам по 1-й категории
 @dp.message(FinancesForm.expenses1)
-async def finances(message: Message, state: FSMContext):
-    await state.update_data(expenses1 = float(message.text))
-    await state.set_state(FinancesForm.category2)
-    await message.reply("Введите вторую категорию расходов:")
-
-@dp.message(FinancesForm.category2)
-async def finances(message: Message, state: FSMContext):
-    await state.update_data(category2 = message.text)
-    await state.set_state(FinancesForm.expenses2)
-    await message.reply("Введите расходы для категории 2:")
-
-@dp.message(FinancesForm.expenses2)
-async def finances(message: Message, state: FSMContext):
-    await state.update_data(expenses2 = float(message.text))
-    await state.set_state(FinancesForm.category3)
-    await message.reply("Введите третью категорию расходов:")
-
-@dp.message(FinancesForm.category3)
-async def finances(message: Message, state: FSMContext):
-    await state.update_data(category3 = message.text)
-    await state.set_state(FinancesForm.expenses3)
-    await message.reply("Введите расходы для категории 3:")
-
-@dp.message(FinancesForm.expenses3)
-async def finances(message: Message, state: FSMContext):
-    data = await state.get_data()
-    telegarm_id = message.from_user.id
-    cursor.execute('''UPDATE users SET category1 = ?, expenses1 = ?, category2 = ?, expenses2 = ?, category3 = ?, expenses3 = ? WHERE telegram_id = ?''',
-                   (data['category1'], data['expenses1'], data['category2'], data['expenses2'], data['category3'], float(message.text), telegarm_id))
+async def fin1(message: Message, state: FSMContext):
+    telegram_id = message.from_user.id
+    cursor.execute(
+        '''UPDATE users SET expenses1 = expenses1 + ? WHERE telegram_id = ?''',
+        (float(message.text), telegram_id))
     conn.commit()
     await state.clear()
+    await message.answer(f"✅ Добавлено {float(message.text)} к расходам!")
 
-    await message.answer("Категории и расходы сохранены!")
+# Обработка команды /category2
+@dp.message(Command('category2'))
+async def cat2(message: Message, state: FSMContext):
+    await state.set_state(FinancesForm.expenses2)
+    await message.reply(f"Введите потраченную сумму:")
+
+# Добавление потраченной суммы к расходам по 2-й категории
+@dp.message(FinancesForm.expenses2)
+async def fin2(message: Message, state: FSMContext):
+    telegram_id = message.from_user.id
+    cursor.execute(
+        '''UPDATE users SET expenses2 = expenses2 + ? WHERE telegram_id = ?''',
+        (float(message.text), telegram_id))
+    conn.commit()
+    await state.clear()
+    await message.answer(f"✅ Добавлено {float(message.text)} к расходам!")
+
+# Обработка команды /category3
+@dp.message(Command('category3'))
+async def cat3(message: Message, state: FSMContext):
+    await state.set_state(FinancesForm.expenses3)
+    await message.reply(f"Введите потраченную сумму:")
+
+# Добавление потраченной суммы к расходам по 3-й категории
+@dp.message(FinancesForm.expenses3)
+async def fin3(message: Message, state: FSMContext):
+    telegram_id = message.from_user.id
+    cursor.execute(
+        '''UPDATE users SET expenses3 = expenses3 + ? WHERE telegram_id = ?''',
+        (float(message.text), telegram_id))
+    conn.commit()
+    await state.clear()
+    await message.answer(f"✅ Добавлено {float(message.text)} к расходам!")
+
+# Обработка команды /help
+@dp.message(Command('help'))
+async def help(message: Message):
+    telegram_id = message.from_user.id
+    cursor.execute('''SELECT * FROM users WHERE telegram_id = ?''', (telegram_id,))
+    user = cursor.fetchone()
+    if user:
+        await message.answer("Этот бот умеет выполнять дополнительные команды:\n"
+                             "/start - приветствие\n"
+                             "/help - список команд\n"
+                             f"/category1 - добавление расходов по категории {user['category1']}\n"
+                             f"/category2 - добавление расходов по категории {user['category2']}\n"
+                             f"/category3 - добавление расходов по категории {user['category3']}")
+    else:
+        await message.answer("Этот бот умеет выполнять дополнительные команды:\n"
+                             "/start - приветствие\n"
+                             "/help - список команд\n"
+                             f"/category1 - добавление расходов по категории 1"
+                             f"/category2 - добавление расходов по категории 2"
+                             f"/category3 - добавление расходов по категории 3")
 
 # Создаем асинхронную функцию main, которая будет запускать наш бот
 async def main():
