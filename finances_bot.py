@@ -132,8 +132,25 @@ async def exchange_rates(message: Message):
     except:
         await message.answer("Произошла ошибка")
 
-# Обработка кнопки Советы
+# Обработка кнопки Советы с LLM
 @dp.message(F.text == "Советы по экономии")
+async def send_llm_tips(message: Message):
+    await bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    url = "http://localhost:8080/completion"
+    data = {
+        "prompt": "Ты выступаешь в роли финансового консультанта. Напиши один совет по экономии личных финансов для домохозяйки. Сильно не умничай. Твой ответ должен быть законченным. Поэтому отвечай коротко, чтобы соответствовать отведенному количеству токенов.",
+        "max_tokens": 200,
+        "temperature": 0.7
+    }
+    response = requests.post(url, json=data)
+    if response.status_code == 200:
+        await message.answer(response.json()["content"])
+    else:
+        print("Failed to fetch data from API. Status Code:", response.status_code)
+        await message.answer("Извините. Произошла ошибка при обращении к ИИ")
+
+# Обработка кнопки Советы
+@dp.message(F.text == "Советы по экономике")
 async def send_tips(message: Message):
     tips = [
         "Ведите бюджет и следите за своими расходами.",
